@@ -1,0 +1,63 @@
+#!/bin/sh
+# Start the Star Wars: Republic Commando dedicated server (START_EXE).
+#
+# Runs `UCC.exe server <map>?game=<class>[?options] ini=<RC_INI> log=server.log` from System/
+# under Wine. Server settings, passwords and the map rotation live in RC_INI (see the
+# 30-ConfigureRepublicCommando hook); any START_ARGS are appended.
+#
+# The game shipped without UCC.exe; the one from SWRCFix (Leon0628) is needed.
+set -e
+
+system="${SERVER_ROOT:-/config/Merged}/System"
+
+if [ ! -f "$system/UCC.exe" ]; then
+    echo "System/UCC.exe not found in ${SERVER_ROOT:-/config/Merged}. Put a Republic Commando install with SWRCFix in /config/Server." >&2
+    exit 1
+fi
+
+# Short game type names (same table as the 30-ConfigureRepublicCommando hook)
+case "$(printf '%s' "${RC_GAME_TYPE:-deathmatch}" | tr '[:upper:]' '[:lower:]')" in
+    deathmatch|dm)                  game="MPGame.DMGame" ;;
+    teamdeathmatch|tdm|td|team)     game="MPGame.TDGame" ;;
+    capturetheflag|ctf)             game="MPGame.CTFGame" ;;
+    assault|as)                     game="MPGame.ASGame" ;;
+    *)                              game="$RC_GAME_TYPE" ;;
+esac
+
+url="${RC_MAP:-DM_Canyon}?game=$game"
+[ -z "$RC_URL_OPTIONS" ] || url="$url?${RC_URL_OPTIONS#\?}"
+
+set -- UCC.exe server "$url" "ini=${RC_INI:-Server.ini}" log=server.log "$@"
+
+echo "Starting: $*"
+
+# UCC resolves packages and inis relative to its working directory
+export WINE_WORKDIR="$system"
+
+# This UCC writes its console with WriteConsole only: without a terminal nothing reaches docker
+# logs, and log=server.log stays empty until the server exits. script(1) gives it a
+# pseudo-terminal (wide, so lines don't wrap at 80 columns), and the perl filter turns Wine's
+# terminal output back into plain lines: "ESC[K ESC[<n>C" is how it draws runs of spaces, the
+# OSC sequences are window title updates, the rest is cursor show/hide.
+cmd="stty cols 1000 rows 50 2>/dev/null;"
+cmd="$cmd exec wine-run"
+for arg in "$@"; do
+    cmd="$cmd '$(printf '%s' "$arg" | sed "s/'/'\\\\''/g")'"
+done
+
+status=$(mktemp)
+echo 0 > "$status"
+
+{ script -qefc "$cmd" /dev/null < /dev/null || echo $? > "$status"; } |
+    LC_ALL=C perl -ne '
+        BEGIN { $| = 1 }
+        s/\e\[K\e\[(\d*)C/" " x ($1 || 1)/ge;
+        s/\e\][^\a]*\a//g;
+        s/\e\[[0-9;?]*[A-Za-z]//g;
+        s/\r//g;
+        print if /\S/;
+    '
+
+code=$(cat "$status")
+rm -f "$status"
+exit "$code"
