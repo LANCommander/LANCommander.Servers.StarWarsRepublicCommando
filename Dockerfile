@@ -13,6 +13,9 @@ LABEL org.opencontainers.image.title="Star Wars: Republic Commando Game Server" 
       app.lancommander.server.external-id.steam="6000" \
       app.lancommander.server.external-id.gog="1421405135"
 
+# Log files LANCommander shows as consoles under the server's Monitor
+LABEL app.lancommander.server.log.server-log="/config/Overlay/System/server.log"
+
 # ----------------------------
 # Server settings
 #   - The game files are not downloadable; put a Republic Commando install (GameData folder, with
